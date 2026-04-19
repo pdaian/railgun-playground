@@ -77,6 +77,125 @@ static void set_error(char error[RAILGUN_ERROR_BUF], const char *message) {
   snprintf(error, RAILGUN_ERROR_BUF, "%s", message);
 }
 
+static int copy_string(char *dst, size_t dst_len, const char *src) {
+  size_t len;
+  if (dst == NULL || src == NULL || dst_len == 0) {
+    return 0;
+  }
+  len = strlen(src);
+  if (len + 1 > dst_len) {
+    return 0;
+  }
+  memcpy(dst, src, len + 1);
+  return 1;
+}
+
+static int address_is_valid(const char *address) {
+  return address != NULL && address[0] != '\0' && strlen(address) < RAILGUN_ADDRESS_BUF;
+}
+
+static void sha256_hex(const uint8_t *data, size_t len, char out[RAILGUN_TX_ID_BUF]) {
+  static const char digits[] = "0123456789abcdef";
+  uint8_t digest[SHA256_DIGEST_LENGTH];
+  size_t i;
+
+  SHA256(data, len, digest);
+  for (i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    out[i * 2] = digits[(digest[i] >> 4) & 0x0f];
+    out[(i * 2) + 1] = digits[digest[i] & 0x0f];
+  }
+  out[RAILGUN_TX_ID_BUF - 1] = '\0';
+}
+
+static railgun_kohaku_ledger_entry_t *ledger_find_entry(
+  const railgun_kohaku_ledger_t *ledger,
+  const char *address
+) {
+  size_t i;
+
+  if (ledger == NULL || address == NULL) {
+    return NULL;
+  }
+  for (i = 0; i < ledger->count; i++) {
+    if (strcmp(ledger->entries[i].address, address) == 0) {
+      return &ledger->entries[i];
+    }
+  }
+  return NULL;
+}
+
+static railgun_kohaku_ledger_entry_t *ledger_get_or_create_entry(
+  railgun_kohaku_ledger_t *ledger,
+  const char *address,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  railgun_kohaku_ledger_entry_t *entry = ledger_find_entry(ledger, address);
+
+  if (entry != NULL) {
+    return entry;
+  }
+  if (ledger == NULL || ledger->entries == NULL) {
+    set_error(error, "ledger is required");
+    return NULL;
+  }
+  if (ledger->count >= ledger->capacity) {
+    set_error(error, "ledger capacity exceeded");
+    return NULL;
+  }
+  entry = &ledger->entries[ledger->count++];
+  memset(entry, 0, sizeof(*entry));
+  if (!copy_string(entry->address, sizeof(entry->address), address)) {
+    ledger->count--;
+    set_error(error, "address is too long");
+    return NULL;
+  }
+  return entry;
+}
+
+static int populate_transfer_receipt(
+  railgun_kohaku_transfer_receipt_t *out,
+  const char *from_address,
+  const char *to_address,
+  uint64_t amount,
+  uint64_t sender_balance,
+  uint64_t recipient_balance,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  char payload[RAILGUN_ADDRESS_BUF * 2 + 80];
+  int written;
+
+  if (out == NULL) {
+    set_error(error, "transfer receipt output is required");
+    return 0;
+  }
+  memset(out, 0, sizeof(*out));
+  if (!copy_string(out->from_address, sizeof(out->from_address), from_address) ||
+      !copy_string(out->to_address, sizeof(out->to_address), to_address)) {
+    set_error(error, "address is too long");
+    return 0;
+  }
+  out->amount = amount;
+  out->sender_balance = sender_balance;
+  out->recipient_balance = recipient_balance;
+
+  written = snprintf(
+    payload,
+    sizeof(payload),
+    "%s|%s|%llu|%llu|%llu",
+    from_address,
+    to_address,
+    (unsigned long long)amount,
+    (unsigned long long)sender_balance,
+    (unsigned long long)recipient_balance
+  );
+  if (written < 0 || (size_t)written >= sizeof(payload)) {
+    set_error(error, "receipt payload encoding failed");
+    return 0;
+  }
+  sha256_hex((const uint8_t *)payload, (size_t)written, out->tx_id);
+  return 1;
+}
+
 static uint64_t rotr64(uint64_t x, uint32_t n) {
   return (x >> n) | (x << (64 - n));
 }
@@ -349,6 +468,188 @@ cleanup:
   BN_CTX_free(ctx);
   OPENSSL_cleanse(i64, sizeof(i64));
   return ok;
+}
+
+int railgun_kohaku_ledger_init(
+  railgun_kohaku_ledger_t *ledger,
+  railgun_kohaku_ledger_entry_t *entries,
+  size_t capacity,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  if (ledger == NULL) {
+    set_error(error, "ledger is required");
+    return 0;
+  }
+  if (entries == NULL && capacity != 0) {
+    set_error(error, "ledger entries are required");
+    return 0;
+  }
+  ledger->entries = entries;
+  ledger->capacity = capacity;
+  ledger->count = 0;
+  if (entries != NULL && capacity != 0) {
+    memset(entries, 0, capacity * sizeof(*entries));
+  }
+  if (error != NULL) {
+    error[0] = '\0';
+  }
+  return 1;
+}
+
+int railgun_kohaku_ledger_set_balance(
+  railgun_kohaku_ledger_t *ledger,
+  const char *address,
+  uint64_t balance,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  railgun_kohaku_ledger_entry_t *entry;
+
+  if (!address_is_valid(address)) {
+    set_error(error, "address is required");
+    return 0;
+  }
+  entry = ledger_get_or_create_entry(ledger, address, error);
+  if (entry == NULL) {
+    return 0;
+  }
+  entry->balance = balance;
+  if (error != NULL) {
+    error[0] = '\0';
+  }
+  return 1;
+}
+
+int railgun_kohaku_check_account_balance(
+  const railgun_kohaku_ledger_t *ledger,
+  const char *address,
+  railgun_kohaku_balance_info_t *out,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  railgun_kohaku_ledger_entry_t *entry;
+
+  if (ledger == NULL) {
+    set_error(error, "ledger is required");
+    return 0;
+  }
+  if (!address_is_valid(address)) {
+    set_error(error, "address is required");
+    return 0;
+  }
+  if (out == NULL) {
+    set_error(error, "balance output is required");
+    return 0;
+  }
+  memset(out, 0, sizeof(*out));
+  entry = ledger_find_entry(ledger, address);
+  if (entry != NULL) {
+    out->balance = entry->balance;
+  }
+  out->is_active = out->balance > 0 ? 1 : 0;
+  if (!copy_string(out->status, sizeof(out->status), out->is_active ? "active" : "inactive")) {
+    set_error(error, "status encoding failed");
+    return 0;
+  }
+  if (error != NULL) {
+    error[0] = '\0';
+  }
+  return 1;
+}
+
+int railgun_kohaku_send_funds(
+  railgun_kohaku_ledger_t *ledger,
+  const char *from_address,
+  const char *to_address,
+  uint64_t amount,
+  railgun_kohaku_transfer_receipt_t *out,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  railgun_kohaku_ledger_entry_t *sender;
+  railgun_kohaku_ledger_entry_t *recipient;
+
+  if (!address_is_valid(from_address) || !address_is_valid(to_address)) {
+    set_error(error, "from and to addresses are required");
+    return 0;
+  }
+  if (strcmp(from_address, to_address) == 0) {
+    set_error(error, "from and to addresses must differ");
+    return 0;
+  }
+  if (amount == 0) {
+    set_error(error, "amount must be greater than zero");
+    return 0;
+  }
+  sender = ledger_get_or_create_entry(ledger, from_address, error);
+  if (sender == NULL) {
+    return 0;
+  }
+  recipient = ledger_get_or_create_entry(ledger, to_address, error);
+  if (recipient == NULL) {
+    return 0;
+  }
+  if (sender->balance < amount) {
+    set_error(error, "insufficient funds");
+    return 0;
+  }
+  if (UINT64_MAX - recipient->balance < amount) {
+    set_error(error, "recipient balance overflow");
+    return 0;
+  }
+  sender->balance -= amount;
+  recipient->balance += amount;
+  if (!populate_transfer_receipt(out, from_address, to_address, amount, sender->balance, recipient->balance, error)) {
+    return 0;
+  }
+  if (error != NULL) {
+    error[0] = '\0';
+  }
+  return 1;
+}
+
+int railgun_kohaku_receive_funds(
+  railgun_kohaku_ledger_t *ledger,
+  const char *to_address,
+  uint64_t amount,
+  const char *source_address,
+  railgun_kohaku_transfer_receipt_t *out,
+  char error[RAILGUN_ERROR_BUF]
+) {
+  railgun_kohaku_ledger_entry_t *recipient;
+  const char *source = source_address;
+
+  if (!address_is_valid(to_address)) {
+    set_error(error, "to address is required");
+    return 0;
+  }
+  if (amount == 0) {
+    set_error(error, "amount must be greater than zero");
+    return 0;
+  }
+  if (source == NULL || source[0] == '\0') {
+    source = "external";
+  } else if (strlen(source) >= RAILGUN_ADDRESS_BUF) {
+    set_error(error, "source address is too long");
+    return 0;
+  }
+  if (strcmp(source, to_address) == 0) {
+    set_error(error, "source and destination addresses must differ");
+    return 0;
+  }
+  recipient = ledger_get_or_create_entry(ledger, to_address, error);
+  if (recipient == NULL) {
+    return 0;
+  }
+  if (UINT64_MAX - recipient->balance < amount) {
+    set_error(error, "recipient balance overflow");
+    return 0;
+  }
+  recipient->balance += amount;
+  if (!populate_transfer_receipt(out, source, to_address, amount, 0, recipient->balance, error)) {
+    return 0;
+  }
+  if (error != NULL) {
+    error[0] = '\0';
+  }
+  return 1;
 }
 
 static int derive_path_hardened(
