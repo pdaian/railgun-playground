@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 from typing import Sequence
+import unicodedata
 
 
 _MASK_64 = (1 << 64) - 1
@@ -183,10 +184,12 @@ def seed_from_mnemonic(mnemonic: str, passphrase: str = "") -> bytes:
     """Derive the 64-byte BIP-39 seed from a mnemonic and optional passphrase."""
     if not mnemonic:
         raise ValueError("mnemonic is required")
-    salt = ("mnemonic" + passphrase).encode("utf-8")
+    normalized_mnemonic = unicodedata.normalize("NFKD", mnemonic)
+    normalized_passphrase = unicodedata.normalize("NFKD", passphrase)
+    salt = ("mnemonic" + normalized_passphrase).encode("utf-8")
     return hashlib.pbkdf2_hmac(
         "sha512",
-        mnemonic.encode("utf-8"),
+        normalized_mnemonic.encode("utf-8"),
         salt,
         2048,
         dklen=64,

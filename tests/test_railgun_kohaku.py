@@ -21,6 +21,16 @@ class RailgunKohakuTests(unittest.TestCase):
         )
         self.assertEqual(seed_from_mnemonic(MNEMONIC).hex(), expected)
 
+    def test_bip39_seed_normalizes_unicode_inputs(self) -> None:
+        self.assertEqual(
+            seed_from_mnemonic("abandon", passphrase="pr\u00e9fixe"),
+            seed_from_mnemonic("abandon", passphrase="pre\u0301fixe"),
+        )
+        self.assertEqual(
+            seed_from_mnemonic("caf\u00e9"),
+            seed_from_mnemonic("cafe\u0301"),
+        )
+
     def test_account_generation_vector(self) -> None:
         account = account_from_mnemonic(
             MNEMONIC,
