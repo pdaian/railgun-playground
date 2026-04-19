@@ -49,15 +49,15 @@ class RailgunKohakuTests(unittest.TestCase):
         )
         self.assertEqual(
             account.nullifying_key,
-            "12851290987139213207337144641703473045639924564445433872002502580024498348591",
+            "1850833569702457231862605360486573998469253365125087039228198490653943843553",
         )
         self.assertEqual(
             account.master_public_key,
-            "403622650532849257806236323871346611442799281025603069778845114161407521106",
+            "5674360650772448173541023358492207952032557933582476282401050051868333884155",
         )
         self.assertEqual(
             account.address,
-            "0zk1qyqwgufu9hde3ufx6k589q9f5tc7rg9tfr2urugfw3k2sngrvrc4yunpd9kxwatwqxqmvzdnuv5eytel5mqejd95d8u8qtsr4nl6kzt0pzccwxgwc6dgxgtm3uw",
+            "0zk1qyxghycxg4yglzu5em3a85jdcgm0jgrmsdsasf0gt9pfw9f5gmp0kunpd9kxwatwqyj9vw533xyqae63ju7gqx4vwx9ggx6rks7ypv6uawhxe8k92uzj2qnu67z",
         )
 
     def test_ledger_balance_send_and_receive(self) -> None:

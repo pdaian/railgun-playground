@@ -470,6 +470,33 @@ cleanup:
   return ok;
 }
 
+static int child_key_derivation_ed25519_hardened(
+  const uint8_t parent_key[32],
+  const uint8_t parent_chain_code[32],
+  uint32_t index,
+  uint8_t child_key[32],
+  uint8_t child_chain_code[32]
+) {
+  uint8_t data[37];
+  uint8_t i64[64];
+
+  data[0] = 0x00;
+  memcpy(data + 1, parent_key, 32);
+  data[33] = (uint8_t)(index >> 24);
+  data[34] = (uint8_t)(index >> 16);
+  data[35] = (uint8_t)(index >> 8);
+  data[36] = (uint8_t)index;
+
+  if (!hmac_sha512(parent_chain_code, 32, data, sizeof(data), i64)) {
+    return 0;
+  }
+
+  memcpy(child_key, i64, 32);
+  memcpy(child_chain_code, i64 + 32, 32);
+  OPENSSL_cleanse(i64, sizeof(i64));
+  return 1;
+}
+
 int railgun_kohaku_ledger_init(
   railgun_kohaku_ledger_t *ledger,
   railgun_kohaku_ledger_entry_t *entries,
@@ -673,6 +700,41 @@ static int derive_path_hardened(
 
   for (i = 0; i < segment_count; i++) {
     if (!child_key_derivation_hardened(cur_key, cur_chain, 0x80000000U + segments[i], cur_key, cur_chain)) {
+      OPENSSL_cleanse(cur_key, sizeof(cur_key));
+      OPENSSL_cleanse(cur_chain, sizeof(cur_chain));
+      return 0;
+    }
+  }
+
+  memcpy(out_key, cur_key, 32);
+  memcpy(out_chain_code, cur_chain, 32);
+  OPENSSL_cleanse(cur_key, sizeof(cur_key));
+  OPENSSL_cleanse(cur_chain, sizeof(cur_chain));
+  return 1;
+}
+
+static int derive_path_ed25519_hardened(
+  const uint8_t seed[64],
+  const uint32_t *segments,
+  size_t segment_count,
+  uint8_t out_key[32],
+  uint8_t out_chain_code[32]
+) {
+  uint8_t i64[64];
+  uint8_t cur_key[32];
+  uint8_t cur_chain[32];
+  size_t i;
+
+  if (!hmac_sha512((const uint8_t *)"ed25519 seed", strlen("ed25519 seed"), seed, 64, i64)) {
+    return 0;
+  }
+  memcpy(cur_key, i64, 32);
+  memcpy(cur_chain, i64 + 32, 32);
+  OPENSSL_cleanse(i64, sizeof(i64));
+
+  for (i = 0; i < segment_count; i++) {
+    if (!child_key_derivation_ed25519_hardened(
+          cur_key, cur_chain, 0x80000000U + segments[i], cur_key, cur_chain)) {
       OPENSSL_cleanse(cur_key, sizeof(cur_key));
       OPENSSL_cleanse(cur_chain, sizeof(cur_chain));
       return 0;
@@ -1362,7 +1424,7 @@ int railgun_kohaku_account_from_mnemonic(
   viewing_path[4] = index;
 
   if (!derive_path_hardened(seed, spending_path, ARRAY_LEN(spending_path), out->spending_private_key, chain_code) ||
-      !derive_path_hardened(seed, viewing_path, ARRAY_LEN(viewing_path), out->viewing_private_key, chain_code)) {
+      !derive_path_ed25519_hardened(seed, viewing_path, ARRAY_LEN(viewing_path), out->viewing_private_key, chain_code)) {
     set_error(error, "BIP32 hardened derivation failed");
     goto cleanup;
   }

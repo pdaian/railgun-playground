@@ -12,7 +12,7 @@ It is self-contained at the protocol layer:
 
 - BIP-39 seed derivation via PBKDF2-HMAC-SHA512.
 - Hardened BIP-32 derivation for the spending path `m/44'/1984'/0'/0'/index'`.
-- Hardened BIP-32 derivation for the viewing path `m/420'/1984'/0'/0'/index'`.
+- Hardened SLIP-0010 Ed25519 derivation for the viewing path `m/420'/1984'/0'/0'/index'`.
 - BabyJub spending public key derivation using the circomlib-compatible `prv2pub` flow:
   `BLAKE-512 -> prune -> little-endian scalar -> >> 3 -> Base8 scalar multiply`.
 - Ed25519 viewing public key derivation from the 32-byte viewing private key.

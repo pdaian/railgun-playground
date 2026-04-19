@@ -214,7 +214,9 @@ def account_from_mnemonic(
 
     seed = seed_from_mnemonic(mnemonic, passphrase)
     spending_private_key, _ = _derive_path_hardened(seed, (*_SPENDING_PATH_PREFIX, index))
-    viewing_private_key, _ = _derive_path_hardened(seed, (*_VIEWING_PATH_PREFIX, index))
+    viewing_private_key, _ = _derive_path_ed25519_hardened(
+        seed, (*_VIEWING_PATH_PREFIX, index)
+    )
     viewing_public_key = _ed25519_public_from_seed(viewing_private_key)
     spending_public_key_x, spending_public_key_y = _derive_spending_public_key(
         spending_private_key
@@ -407,12 +409,31 @@ def _child_key_derivation_hardened(
     return child_int.to_bytes(32, "big"), digest[32:]
 
 
+def _child_key_derivation_ed25519_hardened(
+    parent_key: bytes, parent_chain_code: bytes, index: int
+) -> tuple[bytes, bytes]:
+    data = b"\x00" + parent_key + index.to_bytes(4, "big")
+    digest = _hmac_sha512(parent_chain_code, data)
+    return digest[:32], digest[32:]
+
+
 def _derive_path_hardened(seed: bytes, segments: Sequence[int]) -> tuple[bytes, bytes]:
     digest = _hmac_sha512(b"Bitcoin seed", seed)
     key = digest[:32]
     chain_code = digest[32:]
     for segment in segments:
         key, chain_code = _child_key_derivation_hardened(
+            key, chain_code, 0x80000000 + segment
+        )
+    return key, chain_code
+
+
+def _derive_path_ed25519_hardened(seed: bytes, segments: Sequence[int]) -> tuple[bytes, bytes]:
+    digest = _hmac_sha512(b"ed25519 seed", seed)
+    key = digest[:32]
+    chain_code = digest[32:]
+    for segment in segments:
+        key, chain_code = _child_key_derivation_ed25519_hardened(
             key, chain_code, 0x80000000 + segment
         )
     return key, chain_code
