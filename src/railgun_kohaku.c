@@ -350,6 +350,20 @@ static int bn_to_fixed_be(const BIGNUM *bn, uint8_t *out, size_t len) {
   return 1;
 }
 
+static int bn_to_fixed_le(const BIGNUM *bn, uint8_t *out, size_t len) {
+  uint8_t buffer[32];
+  size_t i;
+
+  if (len > sizeof(buffer) || !bn_to_fixed_be(bn, buffer, len)) {
+    return 0;
+  }
+  for (i = 0; i < len; i++) {
+    out[i] = buffer[len - 1 - i];
+  }
+  OPENSSL_cleanse(buffer, sizeof(buffer));
+  return 1;
+}
+
 static int bn_to_hex_dec(const BIGNUM *bn, char *out, size_t out_len) {
   char *tmp = BN_bn2dec(bn);
   if (tmp == NULL) {
@@ -1356,7 +1370,8 @@ static int bech32m_encode(const char *hrp, const uint8_t *data, size_t data_len,
 }
 
 static int encode_address(
-  const BIGNUM *master_public_key,
+  const BIGNUM *spending_public_key_x,
+  const BIGNUM *spending_public_key_y,
   const uint8_t viewing_public_key[32],
   int use_chain,
   uint8_t chain_type,
@@ -1366,10 +1381,12 @@ static int encode_address(
   uint8_t payload[73];
   uint8_t network_id[8];
   size_t i;
+
   payload[0] = 0x01;
-  if (!bn_to_fixed_be(master_public_key, payload + 1, 32)) {
+  if (!bn_to_fixed_le(spending_public_key_y, payload + 1, 32)) {
     return 0;
   }
+  payload[32] |= (uint8_t)((BN_is_odd(spending_public_key_x) ? 1 : 0) << 7);
   if (use_chain) {
     network_id[0] = chain_type;
     for (i = 0; i < 7; i++) {
@@ -1451,7 +1468,7 @@ int railgun_kohaku_account_from_mnemonic(
     set_error(error, "decimal encoding failed");
     goto cleanup;
   }
-  if (!encode_address(master, out->viewing_public_key, use_chain, chain_type, chain_id, out->address)) {
+  if (!encode_address(spend_x, spend_y, out->viewing_public_key, use_chain, chain_type, chain_id, out->address)) {
     set_error(error, "bech32m address encoding failed");
     goto cleanup;
   }

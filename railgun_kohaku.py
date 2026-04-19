@@ -226,7 +226,8 @@ def account_from_mnemonic(
         [spending_public_key_x, spending_public_key_y, nullifying_key]
     )
     address = _encode_address(
-        master_public_key,
+        spending_public_key_x,
+        spending_public_key_y,
         viewing_public_key,
         use_chain=use_chain,
         chain_type=chain_type,
@@ -646,7 +647,8 @@ def _bech32m_encode(hrp: str, data: bytes) -> str:
 
 
 def _encode_address(
-    master_public_key: int,
+    spending_public_key_x: int,
+    spending_public_key_y: int,
     viewing_public_key: bytes,
     *,
     use_chain: bool,
@@ -655,7 +657,8 @@ def _encode_address(
 ) -> str:
     payload = bytearray(73)
     payload[0] = 0x01
-    payload[1:33] = master_public_key.to_bytes(32, "big")
+    payload[1:33] = spending_public_key_y.to_bytes(32, "little")
+    payload[32] |= (spending_public_key_x & 1) << 7
     if use_chain:
         network_id = bytearray([chain_type]) + bytearray(chain_id.to_bytes(7, "big"))
     else:

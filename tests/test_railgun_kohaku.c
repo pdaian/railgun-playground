@@ -52,7 +52,7 @@ static void test_account_generation_vector(void) {
     "5674360650772448173541023358492207952032557933582476282401050051868333884155") == 0,
     "unexpected master public key");
   expect(strcmp(account.address,
-    "0zk1qyxghycxg4yglzu5em3a85jdcgm0jgrmsdsasf0gt9pfw9f5gmp0kunpd9kxwatwqyj9vw533xyqae63ju7gqx4vwx9ggx6rks7ypv6uawhxe8k92uzj2qnu67z") == 0,
+    "0zk1q8662zeu25nuzud9542rlcjj3arj69uwau6jlqth6r076386mgl3gunpd9kxwatwqyj9vw533xyqae63ju7gqx4vwx9ggx6rks7ypv6uawhxe8k92uzj2f8edwn") == 0,
     "unexpected 0zk address");
 }
 
